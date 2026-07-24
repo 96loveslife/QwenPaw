@@ -47,6 +47,7 @@ from .delegate_external_agent import delegate_external_agent
 from .make_skill_tools import materialize_skill
 from .ast_tool import ast_search
 from .ask_user_question import ask_user_question
+from .run_tool_batch import run_tool_batch
 
 
 def discover_builtin_tool_funcs() -> list[Callable]:
