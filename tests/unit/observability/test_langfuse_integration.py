@@ -285,7 +285,6 @@ class TestLangfuseTraceCleanupHook:
         assert obs["as_type"] == "span"
 
 
-
 # ===========================================================================
 # Tests: OpenAIChatModelCompat.__call__ Langfuse injection
 # ===========================================================================

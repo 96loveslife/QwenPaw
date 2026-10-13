@@ -961,8 +961,7 @@ def _truncate_for_langfuse(text: str) -> str:
         return text
     dropped = len(text) - _MAX_RECORDED_TEXT_CHARS
     return (
-        text[:_MAX_RECORDED_TEXT_CHARS]
-        + f"\n... [truncated {dropped} chars]"
+        text[:_MAX_RECORDED_TEXT_CHARS] + f"\n... [truncated {dropped} chars]"
     )
 
 
@@ -1013,7 +1012,7 @@ class LangfuseToolSpanMiddleware(MiddlewareBase):
                         output={
                             "content": [
                                 _truncate_for_langfuse(
-                                    getattr(b, "text", str(b))
+                                    getattr(b, "text", str(b)),
                                 )
                                 for b in (response.content or [])
                             ],

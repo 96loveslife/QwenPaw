@@ -18,11 +18,13 @@ Covers:
 - Oversized output is truncated
 """
 
+# pylint: disable=redefined-outer-name
+
 from __future__ import annotations
 
 from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator
 
 import pytest
 
@@ -73,11 +75,13 @@ class FakeClient:
         self.next_id = 0
         self._trace_id = trace_id
         self._observation_id = observation_id
+        # Observation factory; tests may swap it to inject failures.
+        self.observation_factory = FakeObservation
 
     def start_observation(self, **kwargs):
         self.started.append(kwargs)
         self.next_id += 1
-        obs = FakeObservation(f"obs-{self.next_id}")
+        obs = self.observation_factory(f"obs-{self.next_id}")
         self.observations.append(obs)
         return obs
 
@@ -85,7 +89,7 @@ class FakeClient:
     def start_as_current_observation(self, **kwargs):
         self.started.append(kwargs)
         self.next_id += 1
-        obs = FakeObservation(f"obs-{self.next_id}")
+        obs = self.observation_factory(f"obs-{self.next_id}")
         self.observations.append(obs)
         yield obs
 
@@ -97,16 +101,7 @@ class FakeClient:
 
     def break_observations(self) -> None:
         """Make every observation created from now on raise on update."""
-        original_start = self.start_observation
-
-        def start_broken(**kwargs):
-            original_start(**kwargs)
-            obs = self.observations[-1]
-            broken = BrokenUpdateObservation(obs.id)
-            self.observations[-1] = broken
-            return broken
-
-        self.start_observation = start_broken  # type: ignore[method-assign]
+        self.observation_factory = BrokenUpdateObservation
 
 
 # ---------------------------------------------------------------------------
@@ -219,8 +214,11 @@ class TestLangfuseToolSpanMiddleware:
 
         mw = LangfuseToolSpanMiddleware()
         collected = await _run_like_drain(
-            mw.on_acting(SimpleNamespace(), {"tool_call": _tool_call()},
-                         fake_next_handler),
+            mw.on_acting(
+                SimpleNamespace(),
+                {"tool_call": _tool_call()},
+                fake_next_handler,
+            ),
             stop_at_response=False,
         )
 
@@ -242,8 +240,11 @@ class TestLangfuseToolSpanMiddleware:
             ),
         }
         collected = await _run_like_drain(
-            mw.on_acting(SimpleNamespace(), input_kwargs,
-                         fake_next_handler),
+            mw.on_acting(
+                SimpleNamespace(),
+                input_kwargs,
+                fake_next_handler,
+            ),
         )
 
         assert collected == [tool_response]
@@ -254,18 +255,25 @@ class TestLangfuseToolSpanMiddleware:
 
     async def test_records_output_on_normal_drain(self, client):
         """Output is recorded exactly once when the consumer fully drains."""
+
         async def fake_next_handler():
             yield _text_response("result data")
 
         mw = LangfuseToolSpanMiddleware()
         await _run_like_drain(
-            mw.on_acting(SimpleNamespace(), {"tool_call": _tool_call()},
-                         fake_next_handler),
+            mw.on_acting(
+                SimpleNamespace(),
+                {"tool_call": _tool_call()},
+                fake_next_handler,
+            ),
         )
 
         obs = client.observations[0]
-        assert _output_updates(obs) == [{"output":
-                                         {"content": ["result data"]}}]
+        assert _output_updates(obs) == [
+            {
+                "output": {"content": ["result data"]},
+            },
+        ]
         # update must happen before end, otherwise the real SDK may
         # drop the output
         assert obs.calls == ["update", "end"]
@@ -283,18 +291,25 @@ class TestLangfuseToolSpanMiddleware:
         ``async for`` loop — otherwise the observation is exported with
         input but no output.
         """
+
         async def fake_next_handler():
             yield _text_response("result data")
 
         mw = LangfuseToolSpanMiddleware()
         await _run_like_drain(
-            mw.on_acting(SimpleNamespace(), {"tool_call": _tool_call()},
-                         fake_next_handler),
+            mw.on_acting(
+                SimpleNamespace(),
+                {"tool_call": _tool_call()},
+                fake_next_handler,
+            ),
         )
 
         obs = client.observations[0]
-        assert _output_updates(obs) == [{"output":
-                                         {"content": ["result data"]}}]
+        assert _output_updates(obs) == [
+            {
+                "output": {"content": ["result data"]},
+            },
+        ]
         assert obs.calls == ["update", "end"]
 
     @pytest.mark.parametrize(
@@ -310,19 +325,27 @@ class TestLangfuseToolSpanMiddleware:
         must be recorded, otherwise the observation exports with input
         but no output (the original bug: ``updates: [], ended: True``).
         """
+
         async def fake_next_handler():
             yield _chunk("boom: file not found", state)
 
         mw = LangfuseToolSpanMiddleware()
         await _run_like_drain(
-            mw.on_acting(SimpleNamespace(), {"tool_call": _tool_call()},
-                         fake_next_handler),
+            mw.on_acting(
+                SimpleNamespace(),
+                {"tool_call": _tool_call()},
+                fake_next_handler,
+            ),
         )
 
         obs = client.observations[0]
-        assert _output_updates(obs) == [{"output":
-                                         {"content":
-                                          ["boom: file not found"]}}]
+        assert _output_updates(obs) == [
+            {
+                "output": {
+                    "content": ["boom: file not found"],
+                },
+            },
+        ]
         assert obs.calls == ["update", "end"]
 
     async def test_intermediate_chunks_are_ignored(self, client):
@@ -333,6 +356,7 @@ class TestLangfuseToolSpanMiddleware:
         intermediate partial output, and exactly one output update must
         be written.
         """
+
         async def fake_next_handler():
             for i in range(50):
                 yield _chunk(f"part {i}")
@@ -340,8 +364,11 @@ class TestLangfuseToolSpanMiddleware:
 
         mw = LangfuseToolSpanMiddleware()
         await _run_like_drain(
-            mw.on_acting(SimpleNamespace(), {"tool_call": _tool_call()},
-                         fake_next_handler),
+            mw.on_acting(
+                SimpleNamespace(),
+                {"tool_call": _tool_call()},
+                fake_next_handler,
+            ),
         )
 
         obs = client.observations[0]
@@ -356,9 +383,12 @@ class TestLangfuseToolSpanMiddleware:
         ToolResponse at its own layer. The middleware must record the
         error and re-raise the ORIGINAL exception untouched.
         """
+
         async def fake_next_handler():
             raise RuntimeError("disk on fire")
-            yield  # pragma: no cover - makes this an async generator
+            # The unreachable yield makes this an async generator so the
+            # middleware can iterate it; pylint/coverage flags are expected.
+            yield  # pylint: disable=unreachable
 
         mw = LangfuseToolSpanMiddleware()
         gen = mw.on_acting(
@@ -393,8 +423,11 @@ class TestLangfuseToolSpanMiddleware:
 
         mw = LangfuseToolSpanMiddleware()
         collected = await _run_like_drain(
-            mw.on_acting(SimpleNamespace(), {"tool_call": _tool_call()},
-                         fake_next_handler),
+            mw.on_acting(
+                SimpleNamespace(),
+                {"tool_call": _tool_call()},
+                fake_next_handler,
+            ),
         )
 
         assert collected == [tool_response]
@@ -417,8 +450,11 @@ class TestLangfuseToolSpanMiddleware:
 
         mw = LangfuseToolSpanMiddleware()
         collected = await _run_like_drain(
-            mw.on_acting(SimpleNamespace(), {"tool_call": _tool_call()},
-                         fake_next_handler),
+            mw.on_acting(
+                SimpleNamespace(),
+                {"tool_call": _tool_call()},
+                fake_next_handler,
+            ),
         )
 
         assert collected == [error_chunk]
@@ -434,8 +470,11 @@ class TestLangfuseToolSpanMiddleware:
 
         mw = LangfuseToolSpanMiddleware()
         await _run_like_drain(
-            mw.on_acting(SimpleNamespace(), {"tool_call": _tool_call()},
-                         fake_next_handler),
+            mw.on_acting(
+                SimpleNamespace(),
+                {"tool_call": _tool_call()},
+                fake_next_handler,
+            ),
         )
 
         obs = client.observations[0]
